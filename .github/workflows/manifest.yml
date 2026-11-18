@@ -1,0 +1,42 @@
+name: Manifiesto para Posit Connect Cloud
+# Posit Connect Cloud necesita un manifest.json con la versión de R y de cada paquete.
+# Este flujo instala los paquetes desde Posit Package Manager, prueba que la app arranque
+# y que lea los datos publicados, y actualiza manifest.json si cambió.
+on:
+  push:
+    branches: [main]
+    paths: ["app.R", "R/**", ".github/workflows/manifest.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  manifiesto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+      - name: Instalar paquetes
+        run: Rscript -e 'install.packages(c("shiny", "bslib", "plotly", "rsconnect"))'
+      - name: Probar que la app arranque y lea los datos
+        run: |
+          Rscript -e 'source("R/modelo.R"); source("R/datos.R"); d <- cargar_datos(); stopifnot(nrow(d$serie) > 60); f <- pronosticar(d$elegido, d$serie, 12, d$anios_eleccion); stopifnot(nrow(f$tabla) == 12, all(f$tabla$pronostico > 0)); cat("Datos hasta", format(max(d$serie$fecha)), "- 12 meses:", round(sum(f$tabla$pronostico)), "contratos\n")'
+          Rscript -e 'shiny::runApp(".", port = 3838)' > app.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:3838 > /dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:3838 | grep -q "Laboratorio"
+          kill %1 || true
+          ! grep -q "^Error\|Warning: Error" app.log
+      - name: Escribir manifest.json
+        run: Rscript -e 'rsconnect::writeManifest(appPrimaryDoc = "app.R", appFiles = c("app.R", "R/modelo.R", "R/datos.R"))'
+      - name: Guardar el manifiesto si cambió
+        run: |
+          if git diff --quiet -- manifest.json && git ls-files --error-unmatch manifest.json >/dev/null 2>&1; then
+            echo "El manifiesto no cambió"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "Actualizar manifest.json para Posit Connect Cloud"
+          git push
