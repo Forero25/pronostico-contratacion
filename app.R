@@ -224,15 +224,19 @@ server <- function(input, output, session) {
                 selected = as.character(inicios[1]))
   })
 
+  # En pantallas angostas la barra lateral empieza cerrada: el control se dibuja igual y,
+  # mientras no exista, se entrena con toda la serie.
+  outputOptions(output, "control_inicio", suspendWhenHidden = FALSE)
+  inicio <- reactive(if (is.null(input$inicio)) serie$fecha[1] else as.Date(input$inicio))
+
   lab <- reactive({
-    req(input$inicio)
-    s <- serie[serie$fecha >= as.Date(input$inicio), ]
+    s <- serie[serie$fecha >= inicio(), ]
     validate(need(nrow(s) >= 25, "Hacen falta al menos dos años de datos."))
     pronosticar(input$modelo, s, input$horizonte, d$anios_eleccion, as.numeric(input$nivel))
   })
 
   output$g_lab <- renderPlotly({
-    s <- serie[serie$fecha >= as.Date(input$inicio), ]
+    s <- serie[serie$fecha >= inicio(), ]
     grafico_pronostico(s, lab()$tabla, as.numeric(input$nivel))
   })
 
@@ -273,9 +277,9 @@ server <- function(input, output, session) {
     selectInput("origen", "Origen del pronóstico", choices = setNames(as.character(rev(origenes)), mes_anio(rev(origenes))),
                 selected = as.character(destacado)))
 
+  outputOptions(output, "control_origen", suspendWhenHidden = FALSE)
   output$g_eval <- renderPlotly({
-    req(input$origen)
-    o <- as.Date(input$origen)
+    o <- if (is.null(input$origen)) destacado else as.Date(input$origen)
     r <- d$retro[d$retro$origen == o & d$retro$modelo %in% input$modelos_eval, ]
     ventana <- serie[serie$fecha >= o - 400 & serie$fecha <= max(r$fecha, o), ]
     p <- plot_ly() |>
